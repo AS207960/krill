@@ -76,6 +76,8 @@ iterable_enum! {
         BGPSEC_UPDATE,
         RTA_LIST,
         RTA_READ,
-        RTA_UPDATE
+        RTA_UPDATE,
+        PAD_READ,
+        PAD_UPDATE
     }
 }

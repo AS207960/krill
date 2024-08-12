@@ -15,6 +15,9 @@ pub use self::certauth::CertAuth;
 mod child;
 pub use self::child::*;
 
+mod pad;
+pub use self::pad::*;
+
 mod rc;
 pub use self::rc::ResourceClass;
 

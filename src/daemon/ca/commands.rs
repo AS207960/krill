@@ -10,7 +10,7 @@ use rpki::{
             ResourceClassName, RevocationRequest, RevocationResponse,
         },
     },
-    repository::resources::ResourceSet,
+    repository::resources::{Asn, ResourceSet},
 };
 
 use crate::{
@@ -22,6 +22,7 @@ use crate::{
             IdCertInfo, ParentCaContact, ReceivedCert, RepositoryContact,
             ResourceClassNameMapping, RoaConfigurationUpdates, RtaName,
             StorableRcEntitlement,
+            PadUpdate, PadDefinitionUpdates
         },
         crypto::KrillSigner,
         eventsourcing::{
@@ -255,6 +256,18 @@ pub enum CertAuthCommandDetails {
     BgpSecRenew(Arc<Config>, Arc<KrillSigner>),
 
     // ------------------------------------------------------------
+    // PAD Support
+    // ------------------------------------------------------------
+    PadUpdate(PadDefinitionUpdates, Arc<Config>, Arc<KrillSigner>),
+    PadUpdateExisting(
+        Asn,
+        PadUpdate,
+        Arc<Config>,
+        Arc<KrillSigner>,
+    ),
+    PadRenew(Arc<Config>, Arc<KrillSigner>),
+
+    // ------------------------------------------------------------
     // Publishing
     // ------------------------------------------------------------
 
@@ -476,6 +489,25 @@ impl From<CertAuthCommandDetails> for CertAuthStorableCommand {
                 CertAuthStorableCommand::BgpSecDefinitionUpdates
             }
             CertAuthCommandDetails::BgpSecRenew(_, _) => {
+                CertAuthStorableCommand::ReissueBeforeExpiring
+            }
+
+            // ------------------------------------------------------------
+            // PAD Support
+            // ------------------------------------------------------------
+            CertAuthCommandDetails::PadUpdate(updates, _, _) => {
+                CertAuthStorableCommand::PadUpdate { updates }
+            }
+            CertAuthCommandDetails::PadUpdateExisting(
+                asn,
+                update,
+                _,
+                _,
+            ) => CertAuthStorableCommand::PadUpdateExisting {
+                asn,
+                update,
+            },
+            CertAuthCommandDetails::PadRenew(_, _) => {
                 CertAuthStorableCommand::ReissueBeforeExpiring
             }
 
@@ -906,6 +938,42 @@ impl CertAuthCommandDetails {
             None,
             CertAuthCommandDetails::BgpSecUpdateDefinitions(
                 updates, config, signer,
+            ),
+            actor,
+        )
+    }
+
+    //-------------------------------------------------------------------------------
+    // Peering API Discovery
+    //-------------------------------------------------------------------------------
+    pub fn pad_definitions_update(
+        ca: &CaHandle,
+        updates: PadDefinitionUpdates,
+        config: Arc<Config>,
+        signer: Arc<KrillSigner>,
+        actor: &Actor,
+    ) -> CertAuthCommand {
+        eventsourcing::SentCommand::new(
+            ca,
+            None,
+            CertAuthCommandDetails::PadUpdate(updates, config, signer),
+            actor,
+        )
+    }
+
+    pub fn pad_update(
+        ca: &CaHandle,
+        asn: Asn,
+        update: PadUpdate,
+        config: Arc<Config>,
+        signer: Arc<KrillSigner>,
+        actor: &Actor,
+    ) -> CertAuthCommand {
+        eventsourcing::SentCommand::new(
+            ca,
+            None,
+            CertAuthCommandDetails::PadUpdateExisting(
+                asn, update, config, signer,
             ),
             actor,
         )

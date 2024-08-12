@@ -11,7 +11,7 @@ use rpki::{
         idexchange,
         idexchange::{CaHandle, ChildHandle, ParentHandle, PublisherHandle},
     },
-    repository::resources::ResourceSet,
+    repository::resources::{Asn, ResourceSet},
     uri,
 };
 
@@ -32,6 +32,7 @@ use crate::{
             RepoFileDeleteCriteria, RepositoryContact, RoaConfiguration,
             RoaConfigurationUpdates, RoaPayload, RtaList, RtaName,
             RtaPrepResponse, ServerInfo, Timestamp, UpdateChildRequest,
+            PadDefinitionUpdates, PadUpdate, PadDefinitionList,
         },
         bgp::{BgpAnalyser, BgpAnalysisReport, BgpAnalysisSuggestion},
         crypto::KrillSignerBuilder,
@@ -1242,6 +1243,39 @@ impl KrillServer {
     ) -> KrillResult<()> {
         self.ca_manager
             .ca_bgpsec_definitions_update(ca, updates, actor)
+            .await
+    }
+}
+
+/// # Handle PAD requests
+impl KrillServer {
+    pub async fn ca_pad_definitions_show(
+        &self,
+        ca: CaHandle,
+    ) -> KrillResult<PadDefinitionList> {
+        self.ca_manager.ca_pad_definitions_show(ca).await
+    }
+
+    pub async fn ca_pad_definitions_update(
+        &self,
+        ca: CaHandle,
+        updates: PadDefinitionUpdates,
+        actor: &Actor,
+    ) -> KrillEmptyResult {
+        self.ca_manager
+            .ca_pad_definitions_update(ca, updates, actor)
+            .await
+    }
+
+    pub async fn ca_pad_update(
+        &self,
+        ca: CaHandle,
+        customer: Asn,
+        update: PadUpdate,
+        actor: &Actor,
+    ) -> KrillEmptyResult {
+        self.ca_manager
+            .ca_pad_update(ca, customer, update, actor)
             .await
     }
 }

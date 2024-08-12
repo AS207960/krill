@@ -32,7 +32,7 @@ use crate::{
         ca::{
             self, AspaObjects, AspaObjectsUpdates, CertAuthEvent,
             CertifiedKey, ChildCertificates, CurrentKey, KeyState, NewKey,
-            OldKey, PendingKey, Roas, Routes,
+            OldKey, PendingKey, Roas, Routes, PadObjectsUpdates,
         },
         config::{Config, IssuanceTimingConfig},
     },
@@ -40,8 +40,8 @@ use crate::{
 };
 
 use super::{
-    AspaDefinitions, BgpSecCertificateUpdates, BgpSecCertificates,
-    BgpSecDefinitions, RoaInfo,
+    AspaDefinitions, BgpSecCertificateUpdates, BgpSecCertificates, BgpSecDefinitions,
+    RoaInfo, PadDefinitions, PadObjects
 };
 
 //------------ ResourceClass -----------------------------------------------
@@ -74,6 +74,9 @@ pub struct ResourceClass {
     #[serde(skip_serializing_if = "BgpSecCertificates::is_empty", default)]
     bgpsec_certificates: BgpSecCertificates,
 
+    #[serde(skip_serializing_if = "PadObjects::is_empty", default)]
+    pad: PadObjects,
+
     #[serde(skip_serializing_if = "ChildCertificates::is_empty", default)]
     certificates: ChildCertificates,
 
@@ -100,6 +103,7 @@ impl ResourceClass {
             aspas: AspaObjects::default(),
             certificates: ChildCertificates::default(),
             bgpsec_certificates: BgpSecCertificates::default(),
+            pad: PadObjects::default(),
             last_key_change: Time::now(),
             key_state: KeyState::create(pending_key),
         }
@@ -118,6 +122,7 @@ impl ResourceClass {
             aspas: AspaObjects::default(),
             certificates: ChildCertificates::default(),
             bgpsec_certificates: BgpSecCertificates::default(),
+            pad: PadObjects::default(),
             last_key_change: Time::now(),
             key_state: KeyState::create(pending_key),
         }
@@ -963,6 +968,43 @@ impl ResourceClass {
         updates: BgpSecCertificateUpdates,
     ) {
         self.bgpsec_certificates.updated(updates)
+    }
+}
+
+/// # Peering API Discovery
+impl ResourceClass {
+    pub fn renew_pad(
+        &self,
+        issuance_timing: &IssuanceTimingConfig,
+        signer: &KrillSigner,
+    ) -> KrillResult<PadObjectsUpdates> {
+        if let Ok(key) = self.get_current_key() {
+            let renew_threshold =
+                Some(issuance_timing.new_pad_issuance_threshold());
+            self.pad
+                .renew(key, renew_threshold, issuance_timing, signer)
+        } else {
+            debug!("no PADs to renew - resource class has no current key");
+            Ok(PadObjectsUpdates::default())
+        }
+    }
+
+    pub fn update_pad(
+        &self,
+        all_pads: &PadDefinitions,
+        config: &Config,
+        signer: &KrillSigner,
+    ) -> KrillResult<PadObjectsUpdates> {
+        if let Ok(key) = self.get_current_key() {
+            self.pad.update(all_pads, key, config, signer)
+        } else {
+            debug!("no PADs to update - resource class has no current key");
+            Ok(PadObjectsUpdates::default())
+        }
+    }
+
+    pub fn pad_objects_updated(&mut self, updates: PadObjectsUpdates) {
+        self.pad.updated(updates)
     }
 }
 

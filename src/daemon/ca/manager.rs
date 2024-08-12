@@ -16,7 +16,7 @@ use rpki::{
         publication::{ListReply, Publish, PublishDelta, Update, Withdraw},
     },
     crypto::KeyIdentifier,
-    repository::resources::ResourceSet,
+    repository::resources::{Asn, ResourceSet},
     uri,
 };
 
@@ -37,6 +37,7 @@ use crate::{
             CommandHistoryCriteria, CustomerAsn, ParentCaContact,
             ParentCaReq, ReceivedCert, RepositoryContact, RtaName,
             UpdateChildRequest,
+            PadUpdate, PadDefinitionUpdates, PadDefinitionList
         },
         crypto::KrillSigner,
         error::Error,
@@ -3013,6 +3014,55 @@ impl CaManager {
             ),
         )
         .await?;
+        Ok(())
+    }
+}
+
+/// # Peering Address Discovery functions
+impl CaManager {
+    pub async fn ca_pad_definitions_show(
+        &self,
+        ca: CaHandle,
+    ) -> KrillResult<PadDefinitionList> {
+        let ca = self.get_ca(&ca).await?;
+        Ok(ca.pad_definitions_show())
+    }
+
+    pub async fn ca_pad_definitions_update(
+        &self,
+        ca: CaHandle,
+        updates: PadDefinitionUpdates,
+        actor: &Actor,
+    ) -> KrillResult<()> {
+        self.send_ca_command(
+            CertAuthCommandDetails::pad_definitions_update(
+                &ca,
+                updates,
+                self.config.clone(),
+                self.signer.clone(),
+                actor,
+            ),
+        )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn ca_pad_update(
+        &self,
+        ca: CaHandle,
+        asn: Asn,
+        update: PadUpdate,
+        actor: &Actor,
+    ) -> KrillResult<()> {
+        self.send_ca_command(CertAuthCommandDetails::pad_update(
+            &ca,
+            asn,
+            update,
+            self.config.clone(),
+            self.signer.clone(),
+            actor,
+        ))
+            .await?;
         Ok(())
     }
 }

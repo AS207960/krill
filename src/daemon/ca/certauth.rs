@@ -18,7 +18,7 @@ use rpki::{
     crypto::{KeyIdentifier, PublicKey},
     repository::{
         cert::Cert,
-        resources::ResourceSet,
+        resources::{Asn, ResourceSet},
         rta::RtaBuilder,
         x509::{Time, Validity},
     },
@@ -35,6 +35,7 @@ use crate::{
             ParentCaContact, ReceivedCert, RepositoryContact,
             ResourceClassNameMapping, Revocation, RoaConfiguration,
             RoaConfigurationUpdates, RtaList, RtaName, RtaPrepResponse,
+            PadDefinitionUpdates, PadUpdate, PadDefinitionList
         },
         crypto::{CsrInfo, KrillSigner},
         error::{Error, RoaDeltaError},
@@ -50,6 +51,7 @@ use crate::{
             PreparedRta, ResourceClass, ResourceTaggedAttestation, Rfc8183Id,
             RoaInfo, RoaPayloadJsonMapKey, Routes, RtaContentRequest,
             RtaPrepareRequest, Rtas, SignedRta, StoredBgpSecCsr,
+            PadDefinitions,
         },
         config::{Config, IssuanceTimingConfig},
     },
@@ -93,6 +95,9 @@ pub struct CertAuth {
 
     #[serde(skip_serializing_if = "BgpSecDefinitions::is_empty", default)]
     bgpsec_defs: BgpSecDefinitions,
+
+    #[serde(skip_serializing_if = "PadDefinitions::is_empty", default)]
+    pad_defs: PadDefinitions,
 }
 
 impl Aggregate for CertAuth {
@@ -120,6 +125,7 @@ impl Aggregate for CertAuth {
         let rtas = Rtas::default();
         let aspas = AspaDefinitions::default();
         let bgpsec_defs = BgpSecDefinitions::default();
+        let pad_defs = PadDefinitions::default();
 
         CertAuth {
             handle,
@@ -139,6 +145,7 @@ impl Aggregate for CertAuth {
             rtas,
             aspas,
             bgpsec_defs,
+            pad_defs,
         }
     }
 
@@ -438,6 +445,27 @@ impl Aggregate for CertAuth {
             }
 
             //-----------------------------------------------------------------------
+            // Peering API Discovery
+            //-----------------------------------------------------------------------
+            CertAuthEvent::PadConfigAdded { pad_config } => {
+                self.pad_defs.add_or_replace(pad_config)
+            }
+            CertAuthEvent::PadConfigUpdated { asn, update } => {
+                self.pad_defs.apply_update(asn, &update)
+            }
+            CertAuthEvent::PadConfigRemoved { asn } => {
+                self.pad_defs.remove(asn)
+            }
+            CertAuthEvent::PadObjectsUpdated {
+                resource_class_name,
+                updates,
+            } => self
+                .resources
+                .get_mut(&resource_class_name)
+                .unwrap()
+                .pad_objects_updated(updates),
+
+            //-----------------------------------------------------------------------
             // Publication
             //-----------------------------------------------------------------------
             CertAuthEvent::RepoUpdated { contact } => {
@@ -596,6 +624,20 @@ impl Aggregate for CertAuth {
             ) => self.bgpsec_definitions_update(updates, &config, &signer),
             CertAuthCommandDetails::BgpSecRenew(config, signer) => {
                 self.bgpsec_renew(&config, &signer)
+            }
+
+            // PAD
+            CertAuthCommandDetails::PadUpdate(updates, config, signer) => {
+                self.pad_definitions_update(updates, &config, &signer)
+            }
+            CertAuthCommandDetails::PadUpdateExisting(
+                asn,
+                update,
+                config,
+                signer,
+            ) => self.pad_update(asn, update, &config, &signer),
+            CertAuthCommandDetails::PadRenew(config, signer) => {
+                self.pad_renew(&config, &signer)
             }
 
             // Republish
@@ -2312,7 +2354,7 @@ impl CertAuth {
         config: &Config,
         signer: &KrillSigner,
     ) -> KrillResult<Vec<CertAuthEvent>> {
-        if self.updated_allowed_and_needed(customer, &update)? {
+        if self.aspa_updated_allowed_and_needed(customer, &update)? {
             let mut all_aspas = self.aspas.clone();
             all_aspas.apply_update(customer, &update);
 
@@ -2380,7 +2422,7 @@ impl CertAuth {
     /// allows an operator just issue a command to add a provider for a
     /// customer ASN, and if it was already authorised then no work is
     /// needed.
-    fn updated_allowed_and_needed(
+    fn aspa_updated_allowed_and_needed(
         &self,
         customer: CustomerAsn,
         update: &AspaProvidersUpdate,
@@ -2541,6 +2583,171 @@ impl CertAuth {
         }
 
         Ok(events)
+    }
+}
+
+
+
+/// # Peering API Discovery
+impl CertAuth {
+    pub fn pad_definitions_show(&self) -> PadDefinitionList {
+        PadDefinitionList::new(self.pad_defs.all().cloned().collect())
+    }
+
+    pub fn pad_definitions_update(
+        &self,
+        updates: PadDefinitionUpdates,
+        config: &Config,
+        signer: &KrillSigner,
+    ) -> KrillResult<Vec<CertAuthEvent>> {
+        let mut events = vec![];
+
+        let (update, remove) = updates.unpack();
+
+        let mut all_pad = self.pad_defs.clone();
+
+        for asn in remove {
+            if !all_pad.has(asn) {
+                return Err(Error::PadAsnUnknown(
+                    self.handle().clone(),
+                    asn,
+                ));
+            }
+            events.push(CertAuthEvent::PadConfigRemoved { asn });
+            all_pad.remove(asn);
+        }
+
+        for pad_config in update {
+            let asn = pad_config.asn();
+            if !pad_config.valid_uri() {
+                return Err(Error::PadInvalidUri(
+                    self.handle().clone(),
+                    asn,
+                ));
+            }
+
+            if !self.all_resources().contains_asn(asn) {
+                return Err(Error::PadAsNotEntitled(
+                    self.handle().clone(),
+                    asn,
+                ));
+            }
+
+            all_pad.add_or_replace(pad_config.clone());
+
+            match self.pad_defs.get(asn) {
+                None => events
+                    .push(CertAuthEvent::PadConfigAdded { pad_config }),
+                Some(_) => {
+                    let update = PadUpdate::new(pad_config.peering_api_uri().clone());
+
+                    events.push(CertAuthEvent::PadConfigUpdated {
+                        asn,
+                        update,
+                    })
+                }
+            }
+        }
+
+        events.append(
+            &mut self
+                .create_updated_pad_objects(&all_pad, config, signer)?,
+        );
+
+        Ok(events)
+    }
+
+    pub fn pad_update(
+        &self,
+        asn: Asn,
+        update: PadUpdate,
+        config: &Config,
+        signer: &KrillSigner,
+    ) -> KrillResult<Vec<CertAuthEvent>> {
+        if self.pad_updated_allowed_and_needed(asn, &update)? {
+            let mut all_pad = self.pad_defs.clone();
+            all_pad.apply_update(asn, &update);
+
+            let mut events =
+                self.create_updated_pad_objects(&all_pad, config, signer)?;
+            events
+                .push(CertAuthEvent::PadConfigUpdated { asn, update });
+
+            Ok(events)
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    pub fn pad_renew(
+        &self,
+        config: &Config,
+        signer: &KrillSigner,
+    ) -> KrillResult<Vec<CertAuthEvent>> {
+        let mut events = vec![];
+
+        for (rcn, rc) in self.resources.iter() {
+            let updates = rc.renew_pad(&config.issuance_timing, signer)?;
+            if updates.contains_changes() {
+                info!(
+                    "CA '{}' reissued PADs under RC '{}' before they would expire",
+                    self.handle, rcn
+                );
+
+                events.push(CertAuthEvent::PadObjectsUpdated {
+                    resource_class_name: rcn.clone(),
+                    updates,
+                });
+            }
+        }
+
+        Ok(events)
+    }
+
+    fn create_updated_pad_objects(
+        &self,
+        all_pad: &PadDefinitions,
+        config: &Config,
+        signer: &KrillSigner,
+    ) -> KrillResult<Vec<CertAuthEvent>> {
+        let mut events = vec![];
+
+        for (rcn, rc) in self.resources.iter() {
+            let updates = rc.update_pad(all_pad, config, signer)?;
+            if updates.contains_changes() {
+                events.push(CertAuthEvent::PadObjectsUpdated {
+                    resource_class_name: rcn.clone(),
+                    updates,
+                });
+            }
+        }
+        Ok(events)
+    }
+
+    fn pad_updated_allowed_and_needed(
+        &self,
+        asn: Asn,
+        update: &PadUpdate,
+    ) -> KrillResult<bool> {
+        if !self.all_resources().contains_asn(asn) {
+            return Err(Error::PadAsNotEntitled(
+                self.handle().clone(),
+                asn,
+            ));
+        }
+
+        let existing = match self
+            .pad_defs
+            .get(asn)
+            .cloned() {
+            Some(p) => p,
+            None => return Ok(true)
+        };
+
+        let mut updated = existing.clone();
+        updated.apply_update(update);
+
+        Ok(updated == existing)
     }
 }
 

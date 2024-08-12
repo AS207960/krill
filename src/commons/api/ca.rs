@@ -50,6 +50,7 @@ use crate::{
         api::{
             rrdp::PublishElement, AspaDefinition, ErrorResponse,
             ParentCaContact, RepositoryContact, RoaAggregateKey, RoaPayload,
+            PadDefinition,
         },
         util::KrillVersion,
     },
@@ -602,6 +603,10 @@ impl ObjectName {
         ObjectName(format!("{}.asa", customer).into())
     }
 
+    pub fn pad(asn: Asn) -> Self {
+        ObjectName(format!("{}.pad", asn).into())
+    }
+
     pub fn bgpsec(asn: Asn, key: KeyIdentifier) -> Self {
         ObjectName(
             format!("ROUTER-{:08X}-{}.cer", asn.into_u32(), key).into(),
@@ -664,6 +669,13 @@ impl From<&BgpSecCertInfo> for ObjectName {
         Self::bgpsec(info.asn(), info.public_key().key_identifier())
     }
 }
+
+impl From<&PadDefinition> for ObjectName {
+    fn from(pad: &PadDefinition) -> Self {
+        Self::pad(pad.asn())
+    }
+}
+
 
 impl From<&BgpSecAsnKey> for ObjectName {
     fn from(asn_key: &BgpSecAsnKey) -> Self {

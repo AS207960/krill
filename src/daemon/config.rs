@@ -253,6 +253,14 @@ impl ConfigDefaults {
         4
     }
 
+    fn timing_pad_valid_weeks() -> u32 {
+        52
+    }
+
+    fn timing_pad_reissue_weeks_before() -> u32 {
+        4
+    }
+
     pub fn openssl_signer_only() -> Vec<SignerConfig> {
         let signer_config = OpenSslSignerConfig {
             keys_storage_uri: None,
@@ -674,6 +682,10 @@ pub struct IssuanceTimingConfig {
     timing_bgpsec_valid_weeks: u32,
     #[serde(default = "ConfigDefaults::timing_bgpsec_reissue_weeks_before")]
     timing_bgpsec_reissue_weeks_before: u32,
+    #[serde(default = "ConfigDefaults::timing_pad_valid_weeks")]
+    timing_pad_valid_weeks: u32,
+    #[serde(default = "ConfigDefaults::timing_pad_reissue_weeks_before")]
+    timing_pad_reissue_weeks_before: u32,
 }
 
 impl IssuanceTimingConfig {
@@ -778,6 +790,18 @@ impl IssuanceTimingConfig {
     pub fn new_bgpsec_issuance_threshold(&self) -> Time {
         Time::now()
             + Duration::weeks(self.timing_bgpsec_reissue_weeks_before.into())
+    }
+
+    //-- PAD
+    pub fn new_pad_validity(&self) -> Validity {
+        SignSupport::sign_validity_weeks(
+            self.timing_pad_valid_weeks.into(),
+        )
+    }
+
+    pub fn new_pad_issuance_threshold(&self) -> Time {
+        Time::now()
+            + Duration::weeks(self.timing_pad_reissue_weeks_before.into())
     }
 }
 
@@ -1179,6 +1203,10 @@ impl Config {
             ConfigDefaults::timing_bgpsec_valid_weeks();
         let timing_bgpsec_reissue_weeks_before =
             ConfigDefaults::timing_bgpsec_reissue_weeks_before();
+        let timing_pad_valid_weeks =
+            ConfigDefaults::timing_pad_valid_weeks();
+        let timing_pad_reissue_weeks_before =
+            ConfigDefaults::timing_pad_reissue_weeks_before();
 
         let issuance_timing = IssuanceTimingConfig {
             timing_publish_next_hours,
@@ -1192,6 +1220,8 @@ impl Config {
             timing_aspa_reissue_weeks_before,
             timing_bgpsec_valid_weeks,
             timing_bgpsec_reissue_weeks_before,
+            timing_pad_valid_weeks,
+            timing_pad_reissue_weeks_before,
         };
 
         let rrdp_updates_config = RrdpUpdatesConfig {

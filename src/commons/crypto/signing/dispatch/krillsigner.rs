@@ -48,7 +48,7 @@ use crate::{
 
 #[cfg(feature = "hsm")]
 use std::collections::HashMap;
-
+use rpki::repository::pad::{Pad, PadBuilder};
 #[cfg(feature = "hsm")]
 use crate::commons::crypto::{
     signers::{kmip::KmipSigner, pkcs11::Pkcs11Signer},
@@ -361,6 +361,17 @@ impl KrillSigner {
         key_id: &KeyIdentifier,
     ) -> CryptoResult<Aspa> {
         aspa_builder
+            .finalize(object_builder, &self.router, key_id)
+            .map_err(crypto::Error::signing)
+    }
+
+    pub fn sign_pad(
+        &self,
+        pad_builder: PadBuilder,
+        object_builder: SignedObjectBuilder,
+        key_id: &KeyIdentifier,
+    ) -> CryptoResult<Pad> {
+        pad_builder
             .finalize(object_builder, &self.router, key_id)
             .map_err(crypto::Error::signing)
     }

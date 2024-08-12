@@ -12,7 +12,7 @@ use rpki::{
         },
     },
     crypto::KeyIdentifier,
-    repository::{resources::ResourceSet, x509::Time},
+    repository::{resources::{Asn, ResourceSet}, x509::Time},
     rrdp::Hash,
 };
 
@@ -21,6 +21,7 @@ use crate::{
         api::{
             ArgKey, ArgVal, AspaProvidersUpdate, CustomerAsn, Message,
             RoaConfigurationUpdates, RtaName, StorableParentContact,
+            PadDefinitionUpdates, PadUpdate
         },
         eventsourcing::{
             Event, InitEvent, StoredCommand, StoredEffect,
@@ -483,6 +484,16 @@ pub enum CertAuthStorableCommand {
         customer: CustomerAsn,
     },
     BgpSecDefinitionUpdates, // details in events
+    PadUpdate {
+        updates: PadDefinitionUpdates,
+    },
+    PadUpdateExisting {
+        asn: Asn,
+        update: PadUpdate,
+    },
+    PadRemove {
+        asn: Asn,
+    },
     RepoUpdate {
         service_uri: ServiceUri,
     },
@@ -615,6 +626,13 @@ impl WithStorableDetails for CertAuthStorableCommand {
 
             // BGPSec
             CertAuthStorableCommand::BgpSecDefinitionUpdates => CommandSummary::new("cmd-bgpsec-update", self),
+
+            // PAD
+            CertAuthStorableCommand::PadUpdate { .. } => CommandSummary::new("cmd-ca-pad-update", self),
+            CertAuthStorableCommand::PadUpdateExisting { .. } => {
+                CommandSummary::new("cmd-ca-pad-update-existing", self)
+            }
+            CertAuthStorableCommand::PadRemove { .. } => CommandSummary::new("cmd-ca-pad-remove", self),
 
             // REPO
             CertAuthStorableCommand::RepoUpdate { service_uri } => {
@@ -815,6 +833,19 @@ impl fmt::Display for CertAuthStorableCommand {
             // BGPSec Support
             // ------------------------------------------------------------
             CertAuthStorableCommand::BgpSecDefinitionUpdates => write!(f, "Update BGPSec definitions"),
+
+            // ------------------------------------------------------------
+            // PAD Support
+            // ------------------------------------------------------------
+            CertAuthStorableCommand::PadUpdate { updates } => {
+                write!(f, "{}", updates)
+            }
+            CertAuthStorableCommand::PadUpdateExisting { asn, update } => {
+                write!(f, "update PAD for AS {}: {}", asn, update)
+            }
+            CertAuthStorableCommand::PadRemove { asn } => {
+                write!(f, "remove PAD fr AS {}", asn)
+            }
 
             // ------------------------------------------------------------
             // Publishing

@@ -9,6 +9,9 @@ pub use self::aspa::*;
 mod bgpsec;
 pub use self::bgpsec::*;
 
+mod pad;
+pub use self::pad::*;
+
 mod ca;
 pub use self::ca::*;
 

@@ -32,6 +32,7 @@ use crate::{
             ApiRepositoryContact, AspaDefinitionUpdates, BgpStats,
             CommandHistoryCriteria, ParentCaReq, PublisherList,
             RepositoryContact, RoaConfigurationUpdates, RtaName, Token,
+            PadDefinitionUpdates
         },
         bgp::BgpAnalysisAdvice,
         error::Error,
@@ -1318,6 +1319,8 @@ async fn api_cas(req: Request, path: &mut RequestPath) -> RoutingResult {
 
                 Some("rta") => api_ca_rta(req, path, ca).await,
 
+                Some("pad") => api_ca_pad(req, path, ca).await,
+
                 _ => render_unknown_method(),
             }
         }),
@@ -2382,6 +2385,97 @@ async fn api_ca_aspas_delete(
         let updates = AspaDefinitionUpdates::new(vec![], vec![customer]);
         render_empty_res(
             state.ca_aspas_definitions_update(ca, updates, &actor).await,
+        )
+    })
+}
+
+// PAD
+async fn api_ca_pad(
+    req: Request,
+    path: &mut RequestPath,
+    ca: CaHandle,
+) -> RoutingResult {
+    match path.next() {
+        None => match *req.method() {
+            Method::GET => api_ca_pad_definitions_show(req, ca).await,
+            Method::POST => api_ca_pad_definitions_update(req, ca).await,
+            _ => render_unknown_method(),
+        },
+        Some("as") => {
+            match path.path_arg() {
+                Some(customer) => match *req.method() {
+                    Method::POST => {
+                        api_ca_pad_update(req, ca, customer).await
+                    }
+                    Method::DELETE => {
+                        api_ca_pad_delete(req, ca, customer).await
+                    }
+                    _ => render_unknown_method(),
+                },
+                None => render_unknown_method(),
+            }
+        }
+        _ => render_unknown_method(),
+    }
+}
+
+async fn api_ca_pad_definitions_show(
+    req: Request,
+    ca: CaHandle,
+) -> RoutingResult {
+    aa!(req, Permission::PAD_READ, Handle::from(&ca), {
+        let state = req.state().clone();
+        render_json_res(state.ca_pad_definitions_show(ca).await)
+    })
+}
+
+async fn api_ca_pad_definitions_update(
+    req: Request,
+    ca: CaHandle,
+) -> RoutingResult {
+    aa!(req, Permission::PAD_UPDATE, Handle::from(&ca), {
+        let actor = req.actor();
+        let state = req.state().clone();
+
+        match req.json().await {
+            Err(e) => render_error(e),
+            Ok(updates) => render_empty_res(
+                state.ca_pad_definitions_update(ca, updates, &actor).await,
+            ),
+        }
+    })
+}
+
+async fn api_ca_pad_update(
+    req: Request,
+    ca: CaHandle,
+    customer: Asn,
+) -> RoutingResult {
+    aa!(req, Permission::PAD_UPDATE, Handle::from(&ca), {
+        let actor = req.actor();
+        let state = req.state().clone();
+
+        match req.json().await {
+            Err(e) => render_error(e),
+            Ok(update) => render_empty_res(
+                state.ca_pad_update(ca, customer, update, &actor).await,
+            ),
+        }
+    })
+}
+
+async fn api_ca_pad_delete(
+    req: Request,
+    ca: CaHandle,
+    customer: Asn,
+) -> RoutingResult {
+    aa!(req, Permission::PAD_UPDATE, Handle::from(&ca), {
+        let actor = req.actor();
+        let state = req.state().clone();
+
+        let updates = PadDefinitionUpdates::new(vec![], vec![customer]);
+        render_empty_res(
+            state.ca_pad_definitions_update(ca, updates, &actor).await,
         )
     })
 }

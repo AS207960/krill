@@ -44,10 +44,7 @@ use crate::{
     },
 };
 
-use super::{
-    AspaInfo, AspaObjectsUpdates, BgpSecCertInfo, BgpSecCertificateUpdates,
-    RoaInfo,
-};
+use super::{AspaInfo, AspaObjectsUpdates, BgpSecCertInfo, BgpSecCertificateUpdates, PadInfo, PadObjectsUpdates, RoaInfo};
 
 //------------ CaObjectsStore ----------------------------------------------
 
@@ -117,6 +114,13 @@ impl PreSaveEventListener<CertAuth> for CaObjectsStore {
                         updates,
                     } => {
                         objects.update_aspas(resource_class_name, updates)?;
+                        force_reissue = true;
+                    }
+                    super::CertAuthEvent::PadObjectsUpdated {
+                        resource_class_name,
+                        updates,
+                    } => {
+                        objects.update_pads(resource_class_name, updates)?;
                         force_reissue = true;
                     }
                     super::CertAuthEvent::BgpSecCertificatesUpdated {
@@ -529,6 +533,14 @@ impl CaObjects {
         self.get_class_mut(rcn).map(|rco| rco.update_aspas(updates))
     }
 
+    fn update_pads(
+        &mut self,
+        rcn: &ResourceClassName,
+        updates: &PadObjectsUpdates,
+    ) -> KrillResult<()> {
+        self.get_class_mut(rcn).map(|rco| rco.update_pads(updates))
+    }
+
     // Update the BGPSec certificates in the current set
     fn update_bgpsec_certs(
         &mut self,
@@ -755,6 +767,20 @@ impl ResourceClassObjects {
             }
             ResourceClassKeyState::Old(state) => {
                 state.current_set.update_aspas(updates)
+            }
+        }
+    }
+
+    fn update_pads(&mut self, updates: &PadObjectsUpdates) {
+        match self.keys.borrow_mut() {
+            ResourceClassKeyState::Current(state) => {
+                state.current_set.update_pads(updates)
+            }
+            ResourceClassKeyState::Staging(state) => {
+                state.current_set.update_pads(updates)
+            }
+            ResourceClassKeyState::Old(state) => {
+                state.current_set.update_pads(updates)
             }
         }
     }
@@ -1191,6 +1217,25 @@ impl KeyObjectSet {
         }
     }
 
+    fn update_pads(&mut self, updates: &PadObjectsUpdates) {
+        for pad_info in updates.updated() {
+            let name = ObjectName::pad(pad_info.asn());
+            let published_object =
+                PublishedObject::for_pad(name.clone(), pad_info);
+            if let Some(old) =
+                self.published_objects.insert(name, published_object)
+            {
+                self.revocations.add(old.revoke());
+            }
+        }
+        for removed in updates.removed() {
+            let name = ObjectName::pad(*removed);
+            if let Some(old) = self.published_objects.remove(&name) {
+                self.revocations.add(old.revoke());
+            }
+        }
+    }
+
     fn update_bgpsec_certs(&mut self, updates: &BgpSecCertificateUpdates) {
         for bgpsec_cert_info in updates.updated() {
             let published_object =
@@ -1471,6 +1516,15 @@ impl PublishedObject {
             aspa_info.base64().clone(),
             aspa_info.serial(),
             aspa_info.expires(),
+        )
+    }
+
+    pub fn for_pad(name: ObjectName, pad_info: &PadInfo) -> Self {
+        PublishedObject::new(
+            name,
+            pad_info.base64().clone(),
+            pad_info.serial(),
+            pad_info.expires(),
         )
     }
 

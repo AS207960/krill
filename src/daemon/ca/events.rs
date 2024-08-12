@@ -9,7 +9,7 @@ use rpki::{
         },
     },
     crypto::KeyIdentifier,
-    repository::resources::ResourceSet,
+    repository::resources::{Asn, ResourceSet},
 };
 
 use crate::{
@@ -19,6 +19,7 @@ use crate::{
             IdCertInfo, IssuedCertificate, ObjectName, ParentCaContact,
             ReceivedCert, RepositoryContact, ResourceClassNameMapping,
             RoaAggregateKey, RtaName, SuspendedCert, UnsuspendedCert,
+            PadDefinition, PadUpdate,
         },
         crypto::KrillSigner,
         eventsourcing::{Event, InitEvent},
@@ -26,7 +27,7 @@ use crate::{
     },
     daemon::ca::{
         AspaInfo, CertifiedKey, PreparedRta, RoaInfo, RoaPayloadJsonMapKey,
-        SignedRta,
+        SignedRta, PadInfo,
     },
 };
 
@@ -334,6 +335,58 @@ impl BgpSecCertificateUpdates {
 
     pub fn add_removed(&mut self, remove: BgpSecAsnKey) {
         self.removed.push(remove);
+    }
+}
+
+//------------ PadObjectsUpdates ------------------------------------------
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PadObjectsUpdates {
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    updated: Vec<PadInfo>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    removed: Vec<Asn>,
+}
+
+impl PadObjectsUpdates {
+    pub fn new(updated: Vec<PadInfo>, removed: Vec<Asn>) -> Self {
+        PadObjectsUpdates { updated, removed }
+    }
+
+    pub fn for_new_aspa_info(new_pad: PadInfo) -> Self {
+        PadObjectsUpdates {
+            updated: vec![new_pad],
+            removed: vec![],
+        }
+    }
+
+    pub fn add_updated(&mut self, update: PadInfo) {
+        self.updated.push(update)
+    }
+
+    pub fn add_removed(&mut self, customer: Asn) {
+        self.removed.push(customer)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.updated.is_empty() && self.removed.is_empty()
+    }
+
+    pub fn contains_changes(&self) -> bool {
+        !self.is_empty()
+    }
+
+    pub fn unpack(self) -> (Vec<PadInfo>, Vec<Asn>) {
+        (self.updated, self.removed)
+    }
+
+    pub fn updated(&self) -> &Vec<PadInfo> {
+        &self.updated
+    }
+
+    pub fn removed(&self) -> &Vec<Asn> {
+        &self.removed
     }
 }
 
@@ -646,6 +699,22 @@ pub enum CertAuthEvent {
         // class
         resource_class_name: ResourceClassName,
         updates: BgpSecCertificateUpdates,
+    },
+
+    // ASPA
+    PadConfigAdded {
+        pad_config: PadDefinition,
+    },
+    PadConfigUpdated {
+        asn: Asn,
+        update: PadUpdate,
+    },
+    PadConfigRemoved {
+        asn: Asn,
+    },
+    PadObjectsUpdated {
+        resource_class_name: ResourceClassName,
+        updates: PadObjectsUpdates,
     },
 
     // Publishing
@@ -1089,6 +1158,34 @@ impl fmt::Display for CertAuthEvent {
                     write!(f, " removed: ")?;
                     for key in removed {
                         write!(f, "{} ", ObjectName::from(key))?;
+                    }
+                }
+                Ok(())
+            }
+
+            // Peering API Discovery
+            CertAuthEvent::PadConfigAdded { pad_config: addition } => write!(f, "{}", addition),
+            CertAuthEvent::PadConfigUpdated { asn, update } => {
+                write!(f, "updated PAD config for ASN: {} {}", asn, update)
+            }
+            CertAuthEvent::PadConfigRemoved { asn } => {
+                write!(f, "removed PAD config for ASN: {}", asn)
+            }
+            CertAuthEvent::PadObjectsUpdated {
+                resource_class_name,
+                updates,
+            } => {
+                write!(f, "updated PAD objects under resource class '{}'", resource_class_name)?;
+                if !updates.updated().is_empty() {
+                    write!(f, " updated:")?;
+                    for upd in updates.updated() {
+                        write!(f, " {}", ObjectName::pad(upd.asn()))?;
+                    }
+                }
+                if !updates.removed().is_empty() {
+                    write!(f, " removed:")?;
+                    for rem in updates.removed() {
+                        write!(f, " {}", ObjectName::pad(*rem))?;
                     }
                 }
                 Ok(())

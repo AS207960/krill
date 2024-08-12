@@ -13,6 +13,7 @@ use rpki::{
     },
     crypto::KeyIdentifier,
     repository::error::ValidationError,
+    resources::Asn,
     uri,
 };
 
@@ -318,6 +319,13 @@ pub enum Error {
     BgpSecDefinitionNotEntitled(CaHandle, BgpSecAsnKey),
 
     //-----------------------------------------------------------------
+    // Peering API Discovery
+    //-----------------------------------------------------------------
+    PadAsNotEntitled(CaHandle, Asn),
+    PadAsnUnknown(CaHandle, Asn),
+    PadInvalidUri(CaHandle, Asn),
+
+    //-----------------------------------------------------------------
     // Key Usage Issues
     //-----------------------------------------------------------------
     KeyUseAttemptReuse,
@@ -507,6 +515,12 @@ impl fmt::Display for Error {
             Error::BgpSecDefinitionInvalidlySigned(_ca, def, msg) => write!(f, "Invalidly signed BGPSec CSR remove BGPSec CSR for ASN '{}' and key '{}', error: {}", def.asn(), def.csr().public_key().key_identifier(), msg),
             Error::BgpSecDefinitionNotEntitled(_ca, key) => write!(f, "AS '{}' is not held by you", key.asn()),
 
+            //-----------------------------------------------------------------
+            // Peering API Discovery
+            //-----------------------------------------------------------------
+            Error::PadAsNotEntitled(_ca, asn) => write!(f, "AS '{}' is not held by you", asn),
+            Error::PadInvalidUri(_ca, asn) => write!(f, "The peering API URI for AS '{}' is invalid", asn),
+            Error::PadAsnUnknown(_ca, asn) => write!(f, "No current PAD exists for customer AS '{}'", asn),
 
             //-----------------------------------------------------------------
             // Key Usage Issues
@@ -1116,6 +1130,25 @@ impl Error {
                 ErrorResponse::new("ca-bgpsec-not-entitled", self)
                     .with_ca(ca)
                     .with_asn(key.asn())
+            }
+
+            //-----------------------------------------------------------------
+            // Peering API Discovery
+            //-----------------------------------------------------------------
+            Error::PadAsNotEntitled(ca, asn) => {
+                ErrorResponse::new("ca-pad-not-entitled", self)
+                    .with_ca(ca)
+                    .with_asn(*asn)
+            }
+            Error::PadInvalidUri(ca, asn) => {
+                ErrorResponse::new("ca-pad-invalid-uri", self)
+                    .with_ca(ca)
+                    .with_asn(*asn)
+            }
+            Error::PadAsnUnknown(ca, asn) => {
+                ErrorResponse::new("ca-pad-unknown-as", self)
+                    .with_ca(ca)
+                    .with_asn(*asn)
             }
 
             //-----------------------------------------------------------------
